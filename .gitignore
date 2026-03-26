@@ -205,3 +205,15 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Local skill tools (not part of published skill)
+.agents/
+.claude/
+.vscode/
+skills-lock.json
+
+# Research notes (not part of skill)
+ref/
+
+# Publishing guide (temporary)
+PUBLISHING_GUIDE.md
