@@ -26,29 +26,73 @@ Generated rules teach AI how to work WITH the existing codebase, not against it.
 
 ## Output
 
-Generates a single rule file (with dimension-based sections) at the project root:
+Generates rule files in the IDE-native rules directory (auto-detected):
+
+| IDE/Tool | Output Directory |
+|----------|------------------|
+| Cursor | `.cursor/rules/` |
+| Trae | `.trae/rules/` |
+| GitHub Copilot (VS Code) | `.github/instructions/` |
+| Claude Code | `.claude/rules/` |
+| Windsurf | `.windsurf/rules/` |
+| Unknown / Fallback | `.ruleminer/` |
 
 ```
-<project-root>/
-├── .rules.md              # Main rule file (Project Overview / Architecture / Naming / Coding / API / Data / Security / Dependencies / Pitfalls / Custom Rules)
-├── .rules-payment.md      # Module-level rules (only generated when a module has special conventions)
-└── .rules-auth.md         # Module-level rules (only generated when a module has special conventions)
+{output-dir}/
+├── legacy-rules.md              # Main rule file (Project Overview / Architecture / Naming / Coding / API / Data / Security / Dependencies / Pitfalls / Custom Rules)
+├── legacy-rules-payment.md      # Module-level rules (only generated when a module has special conventions)
+└── legacy-rules-auth.md         # Module-level rules (only generated when a module has special conventions)
 ```
 
 Features:
 - A `## Custom Rules` section is preserved at the end of the file — users can add rules manually, and regeneration will not overwrite it
-- When `.rules.md` already exists, performs incremental updates rather than full overwrite
+- When `legacy-rules.md` already exists, performs incremental updates rather than full overwrite
 - Module-level rules are updated if they exist, created if they don't
 
 ## Installation
 
+### Via skills.sh (Recommended)
+
+Run in your terminal:
+
 ```bash
-npx skills add <your-github-username>/legacy-rule-miner
+npx skills add xiwen-haochi/legacy-rule-miner
 ```
+
+This will install the skill into your IDE's skill directory automatically.
+
+### Manual Installation
+
+1. Clone this repo:
+   ```bash
+   git clone https://github.com/xiwen-haochi/legacy-rule-miner.git
+   ```
+2. Copy the entire folder into your IDE's skill directory:
+   - **VS Code (Copilot):** `<project-root>/.github/skills/legacy-rule-miner/`
+   - **Cursor:** `<project-root>/.cursor/skills/legacy-rule-miner/`
+   - **Claude Code:** `<project-root>/.agents/skills/legacy-rule-miner/`
 
 ## Usage
 
-Point this Skill at your legacy project in an AI coding IDE and run the analysis. The generated `.rules.md` can be directly copied to `.copilot-instructions.md`, `.cursorrules`, `CLAUDE.md`, or other AI config files.
+### Quick Start
+
+1. **Open your legacy project** in an AI coding IDE (VS Code with Copilot / Cursor / Claude Code)
+2. **Make sure the skill is installed** (see Installation above)
+3. **Start a chat session** and ask the AI to analyze your project:
+   ```
+   Analyze this legacy project and generate legacy-rules.md
+   ```
+4. The skill will automatically:
+   - Detect your IDE and choose the appropriate output directory
+   - Scan your project structure, configs, dependencies, and source code (~80% automated)
+   - Ask you follow-up questions about oral conventions, known pitfalls, and business constraints (~20% interactive)
+   - Generate `legacy-rules.md` in the IDE-native rules directory
+
+### Re-running / Updating
+
+- If `legacy-rules.md` already exists, the skill performs **incremental updates** — only changed sections are updated
+- The `## Custom Rules` section at the end of the file is **never overwritten**, so your manual additions are safe
+- To force a full regeneration, delete `legacy-rules.md` and re-run
 
 ## Five Core Principles
 

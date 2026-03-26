@@ -36,6 +36,15 @@ grep -i "flask" requirements.txt Pipfile pyproject.toml 2>/dev/null
 
 ### 1. Project Structure Patterns
 
+#### Files to Exclude from Code Style Analysis
+Skip these when sampling conventions (still read migration files for schema info):
+- `__pycache__/`, `*.pyc`, `*.pyo` — compiled bytecode
+- `*/migrations/*.py` (except `__init__.py`) — Django auto-generated migrations (read for schema only)
+- `*.egg-info/`, `dist/`, `build/` — packaging output
+- `.tox/`, `.venv/`, `venv/`, `env/` — virtual environments
+- `static/`, `media/`, `staticfiles/` — collected static files
+- `*.min.js`, `*.min.css` in static dirs — minified assets
+
 #### Django
 ```
 project/
@@ -43,16 +52,16 @@ project/
 ├── project/              # Project settings package
 │   ├── __init__.py
 │   ├── settings.py       # or settings/ directory
-│   ├── urls.py
+│   ├── urls.py           # Root URL conf — routes to app URLs
 │   └── wsgi.py
 ├── app1/                 # Django app
 │   ├── __init__.py
-│   ├── admin.py
-│   ├── apps.py
-│   ├── models.py
-│   ├── serializers.py    # DRF
-│   ├── urls.py
-│   ├── views.py
+│   ├── admin.py          # Admin: registers models in Django admin panel
+│   ├── apps.py           # App configuration
+│   ├── models.py         # Data access: ORM model definitions
+│   ├── serializers.py    # DRF: request/response serialization
+│   ├── urls.py           # URL routing for this app
+│   ├── views.py          # Frontend/API: request handlers
 │   └── tests.py
 ├── app2/
 ├── requirements.txt
@@ -65,14 +74,41 @@ project/
 ├── app/
 │   ├── __init__.py       # App factory
 │   ├── models/
+│   │   ├── user.py       # Data access: user model
+│   │   └── order.py      # Data access: order model
 │   ├── views/ or routes/
+│   │   ├── user.py       # Frontend: user views for web/mobile clients
+│   │   ├── api.py        # Third-party: API endpoints for external integrators
+│   │   └── admin.py      # Admin: admin panel views
 │   ├── services/
+│   │   ├── user_service.py        # API-layer: user business logic
+│   │   ├── payment_service.py     # Integration: wraps payment provider
+│   │   └── notification_service.py # Internal-utility: email/SMS sender
+│   ├── tasks/
+│   │   └── sync_orders.py         # Scheduled-task: Celery task for order sync
 │   ├── utils/
 │   └── templates/
 ├── config.py
 ├── requirements.txt
 └── run.py / wsgi.py
 ```
+
+#### File Role Detection for Python
+
+| Clue | How to Detect | What It Means |
+|------|--------------|---------------|
+| URL prefix | `url(r'^api/v1/', ...)`, `@app.route('/admin/')`, `@app.route('/open/')` | Route prefix = audience |
+| Blueprint name | `api_bp = Blueprint('api', ...)`, `admin_bp = Blueprint('admin', ...)` | Blueprint = audience grouping |
+| DRF ViewSet base class | `ModelViewSet` vs `ReadOnlyModelViewSet` vs `APIView` | Different permission/auth patterns |
+| Decorator auth | `@login_required` vs `@api_key_required` vs `@admin_required` | Auth type = audience |
+| Django URL namespace | `namespace='api'`, `namespace='admin'` | Namespace = audience |
+| File location | `views/api.py` vs `views/admin.py` vs `views/user.py` | Directory = audience |
+
+**Disambiguation example**: When both `views/api.py` and `views/user.py` have user-related endpoints:
+- Compare URL prefixes (`/api/v1/users/` vs `/users/`)
+- Compare auth decorators (`@api_key_required` vs `@login_required`)
+- Compare response format (JSON API envelope vs rendered template or DRF response)
+- Document: "`api.py` exposes user data to third-party integrators via API key; `user.py` serves user pages/operations for the frontend SPA via session auth"
 
 ### 2. Settings / Configuration
 
@@ -282,6 +318,117 @@ Things AI will want to "fix" but should NOT:
 8. **Manual SQL queries** — AI will try to convert to ORM. If the project mixes both, follow the file's style.
 9. **No virtual environment** — project may have system-wide installs. Don't try to "fix" the deployment.
 10. **requirements.txt without pinned versions** — AI should not pin versions unless the project does.
+
+---
+
+## File Role & Usage Scenario Patterns
+
+When analyzing a Python project, classify every view/route and service file by its role and audience.
+
+### Django: View File Disambiguation
+
+**Common pattern — `views.py` vs `api.py` in the same app:**
+```
+app/
+├── views.py          # Frontend: serves HTML templates or frontend SPA (session auth)
+├── api.py            # Third-party/API: serves external integrators (API key / token auth)
+├── admin_views.py    # Admin: custom admin views beyond Django admin
+└── webhooks.py       # Webhook: receives callbacks from external services
+```
+
+**URL configuration reveals audience:**
+```python
+# urls.py — different prefixes for different audiences
+urlpatterns = [
+    path('users/', views.UserListView.as_view()),           # Frontend
+    path('api/v1/users/', api.UserApiView.as_view()),       # Third-party API
+    path('admin/users/', admin_views.UserAdminView.as_view()),  # Admin
+    path('webhook/payment/', webhooks.payment_callback),    # Webhook
+    path('internal/sync/', internal.sync_users),            # Internal service
+]
+```
+
+**DRF ViewSet vs standard views:**
+| File / Class | Audience | Clues |
+|-------------|----------|-------|
+| `views.py` → `UserListView(ListView)` | Frontend | Inherits Django generic views, renders templates |
+| `views.py` → `UserView(TemplateView)` | Frontend | Returns `render()` or `TemplateResponse` |
+| `api.py` → `UserViewSet(ModelViewSet)` | API consumers | DRF ViewSet, returns `Response()`, registered in DRF router |
+| `api.py` → `UserApiView(APIView)` | API consumers | DRF APIView, token/key auth |
+| `webhooks.py` → `payment_callback(request)` | Webhook | `@csrf_exempt`, signature verification |
+| `tasks.py` → `sync_orders()` | Scheduled task | `@shared_task` (Celery), `@periodic_task` |
+
+**URL file splitting:**
+```
+app/
+├── urls.py             # Main URL config (may include all below)
+├── api_urls.py         # API-specific URLs (/api/v1/...)
+├── admin_urls.py       # Admin-specific URLs (/admin/...)
+└── webhook_urls.py     # Webhook URLs (/webhook/...)
+```
+
+### Flask: Blueprint-Based Audience Separation
+
+**Blueprint prefix and middleware determine audience:**
+```python
+# Separate blueprints for different audiences
+api_bp = Blueprint('api', __name__, url_prefix='/api/v1')    # Third-party API
+admin_bp = Blueprint('admin', __name__, url_prefix='/admin')  # Admin panel
+web_bp = Blueprint('web', __name__, url_prefix='/')           # Frontend
+
+# Different auth decorators per blueprint
+@api_bp.before_request
+def require_api_key(): ...    # API key auth
+
+@admin_bp.before_request
+def require_admin_login(): ... # Session + admin role check
+```
+
+**File naming per blueprint:**
+```
+app/
+├── api/
+│   ├── __init__.py       # API blueprint registration
+│   ├── users.py          # User API endpoints (Third-party)
+│   └── orders.py         # Order API endpoints (Third-party)
+├── admin/
+│   ├── __init__.py       # Admin blueprint registration
+│   └── users.py          # User admin views (Admin)
+├── views/
+│   ├── __init__.py       # Web blueprint registration
+│   └── users.py          # User frontend views (Frontend)
+└── tasks/
+    └── sync.py           # Celery tasks (Scheduled-task)
+```
+
+### Service Layer Disambiguation
+
+| File | Role | Clues |
+|------|------|-------|
+| `services/user_service.py` | API-layer | Called by view/API controllers |
+| `services/payment_service.py` | Integration | Calls external payment API |
+| `services/notification_service.py` | Internal-utility | Sends emails/SMS, called by multiple services |
+| `tasks.py` / `tasks/xxx.py` | Scheduled-task | Celery `@shared_task` decorator |
+| `management/commands/xxx.py` | Scheduled-task | Django management commands |
+| `signals.py` / `receivers.py` | Event-driven | Django signals (`@receiver`) |
+
+### Detection Commands
+```bash
+# List all view/API files
+find . -name "views.py" -o -name "api.py" -o -name "*_views.py" -o -name "*_api.py" -o -name "webhooks.py" | sort
+
+# Check URL patterns per file
+grep -rn "path(\|url(\|re_path(" --include="*.py" */urls*.py | head -30
+
+# Find view base classes to determine type
+grep -rn "class.*View\|class.*ViewSet\|class.*APIView\|class.*Resource" --include="*.py" | head -30
+
+# Find Celery tasks and management commands
+grep -rn "@shared_task\|@periodic_task\|BaseCommand" --include="*.py" | head -20
+
+# Find auth decorators to determine audience
+grep -rn "@login_required\|@permission_required\|@api_view\|@csrf_exempt\|@authentication_classes" --include="*.py" | head -30
+```
 
 ---
 

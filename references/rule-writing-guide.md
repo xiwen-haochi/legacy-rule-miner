@@ -149,7 +149,7 @@ safer than writing from scratch, even if the AI "knows" a better way.
 
 ## Organizing Rules by Section
 
-All rules go into a single `.rules.md` file with `##` sections. Module-specific rules go into separate `.rules-{module}.md` files.
+All rules go into a single `legacy-rules.md` file with `##` sections. Module-specific rules go into separate `legacy-rules-{module}.md` files.
 
 ### Project Overview
 - Use plain description, not rules
@@ -204,9 +204,9 @@ All rules go into a single `.rules.md` file with `##` sections. Module-specific 
 - Include file paths and line numbers where possible
 - Sort by severity (production-breaking first)
 
-### Module-Level Rules (.rules-{module}.md)
+### Module-Level Rules (legacy-rules-{module}.md)
 - Only created for modules with rules that differ from the global rules
-- Reference the global rules ("Inherits all rules from `.rules.md`. The following are additional/override rules")
+- Reference the global rules ("Inherits all rules from `legacy-rules.md`. The following are additional/override rules")
 
 ---
 

@@ -83,10 +83,14 @@ Generate a directory tree (depth 3–4). Identify:
 - Resource locations (templates, static files, SQL migrations)
 - Test directory structure
 
+**Exclude from analysis**: Skip migration files, compiled output, and build artifacts when sampling code style. See `references/analysis-playbook.md` "Files to Exclude" for the full per-language exclude list. Migration files may still be read for schema information.
+
 Create a sampling plan: for each layer (L2–L7), pick 2–3 representative files per module. Prefer files that are:
 - Recently modified (more likely to reflect current conventions)
 - Medium-sized (not trivially small, not monstrously large)
 - In different modules (to detect cross-module consistency)
+
+**File Role Inventory**: For every code file in each layer directory, create an inventory noting the file's role (controller/service/repository/middleware/util/etc.) and its audience (frontend, admin, third-party/open-api, internal-service, scheduled-task/worker, webhook). Use 4 detection clues: URL prefix, auth middleware type, response format, and file naming/location. When multiple files handle the same domain entity (e.g., `api.py` and `user.py` both have user endpoints), document how they differ in audience and usage scenario. See `references/analysis-playbook.md` L1 “File Role Inventory” for the full checklist.
 
 ### Step 3: Layer-by-Layer Sampling (L2–L7)
 
@@ -106,12 +110,12 @@ For each layer, extract:
 Read `references/rule-writing-guide.md` for rule formatting standards.
 Read `references/output-templates.md` for the skeleton of each output file.
 
-Generate a single rule file `.rules.md` in the project root (or user-specified location). The file is organized by `##` sections:
+Generate a single rule file `legacy-rules.md` in the auto-detected output directory (see [Output Location](#output-location)). The file is organized by `##` sections:
 
 | Section | Content | Minimum Requirements |
 |---------|---------|---------------------|
 | `## Project Overview` | Tech stack, versions, modules, build commands, env vars | Stack + version + build command |
-| `## Architecture` | Layer rules, module boundaries, dependency directions, where to put new code | Layer pattern + new-code placement |
+| `## Architecture` | Layer rules, module boundaries, dependency directions, where to put new code, file role map with audience | Layer pattern + new-code placement + file role map |
 | `## Naming Conventions` | Naming rules with real examples for each entity type | ≥3 entity types with examples |
 | `## Coding Patterns` | Error handling, logging, validation, import conventions, return wrapping — with DO/DON'T | ≥3 patterns with code examples |
 | `## API Design` | URL patterns, request/response format, error codes, middleware | URL pattern + response format |
@@ -123,7 +127,7 @@ Generate a single rule file `.rules.md` in the project root (or user-specified l
 
 Mark uncertain items with `<!-- LOW_CONFIDENCE: reason -->` for user review in Phase 2.
 
-**Incremental update**: If `.rules.md` already exists, update auto-generated sections (Project Overview through Known Pitfalls) while **preserving** the `## Custom Rules` section and any content the user has added there.
+**Incremental update**: If `legacy-rules.md` already exists in the output directory, update auto-generated sections (Project Overview through Known Pitfalls) while **preserving** the `## Custom Rules` section and any content the user has added there.
 
 ### Step 5: Interactive Refinement (L8)
 
@@ -139,7 +143,7 @@ Present a summary of discovered rules to the user. Then ask targeted questions a
 
 ### Step 6: Finalize
 
-Apply user feedback. Generate module-specific rules if needed as separate files: `.rules-{module}.md` (e.g., `.rules-payment.md`, `.rules-api.md`). If a module rule file already exists, update it; if not, create a new one.
+Apply user feedback. Generate module-specific rules if needed as separate files: `legacy-rules-{module}.md` (e.g., `legacy-rules-payment.md`, `legacy-rules-api.md`) in the same output directory. If a module rule file already exists, update it; if not, create a new one.
 
 Output a brief summary: files generated/updated, key findings, confidence level, and any remaining unknowns.
 
@@ -174,16 +178,33 @@ Read these as needed during analysis:
 
 ## Output Location
 
-By default, create files in the project root. The user can override this.
+Auto-detect the IDE/tool from workspace clues and place rule files in its native rules directory. If the user explicitly specifies an output location, use that instead.
+
+### IDE Auto-Detection
+
+| IDE/Tool | Detection Clue | Output Directory |
+|----------|---------------|-----------------|
+| Cursor | `.cursor/` directory exists | `.cursor/rules/` |
+| Trae | `.trae/` directory exists | `.trae/rules/` |
+| GitHub Copilot (VS Code) | `.vscode/` or `.github/` directory exists | `.github/instructions/` |
+| Claude Code | `.claude/` directory or `CLAUDE.md` exists | `.claude/rules/` |
+| Windsurf | `.windsurf/` directory exists | `.windsurf/rules/` |
+| Unknown / Fallback | None of the above | `.ruleminer/` |
+
+Detection order: check in the order listed. If multiple IDE directories exist, prefer the one matching the IDE currently running this skill. When ambiguous, ask the user.
+
+### Output Files
 
 ```
-<project-root>/
-├── .rules.md              # Main rule file (single file, sections by dimension)
-├── .rules-payment.md      # Module-specific rules (only if needed)
-└── .rules-auth.md         # Module-specific rules (only if needed)
+{output-dir}/
+├── legacy-rules.md              # Main rule file (single file, sections by dimension)
+├── legacy-rules-payment.md      # Module-specific rules (only if needed)
+└── legacy-rules-auth.md         # Module-specific rules (only if needed)
 ```
 
-`.rules.md` structure:
+Create the output directory if it does not exist. Add it to `.gitignore` only if the user requests it (some teams want rules committed, others don't).
+
+`legacy-rules.md` structure:
 ```markdown
 # {Project Name} — AI Coding Rules
 ## Project Overview

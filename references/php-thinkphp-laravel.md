@@ -41,24 +41,44 @@ grep "yiisoft/yii2" composer.json
 
 ### 1. Project Structure Patterns
 
+#### Files to Exclude from Code Style Analysis
+Skip these when sampling conventions (still read migration files for schema info):
+- `vendor/` — Composer dependencies
+- `storage/` — Laravel cache, logs, sessions
+- `bootstrap/cache/` — Laravel compiled config/routes
+- `runtime/` — ThinkPHP runtime cache, logs, temp files
+- `database/migrations/` — Laravel migrations (read for schema only)
+- `*.blade.php` compiled cache — not authored code
+- `compiled.php` — framework compiled files
+- `public/assets/`, `public/uploads/` — static files
+
 #### ThinkPHP 5.x
 ```
 application/
 ├── common/           # Common module
 ├── index/            # Frontend module
 │   ├── controller/
+│   │   ├── Index.php          # Frontend: homepage for web visitors
+│   │   └── User.php           # Frontend: user operations for web/mobile
 │   ├── model/
 │   └── view/
 ├── admin/            # Admin module
 │   ├── controller/
+│   │   ├── Index.php          # Admin: dashboard for admin panel
+│   │   └── User.php           # Admin: user management for administrators
 │   ├── model/
 │   └── view/
 ├── api/              # API module
+│   ├── controller/
+│   │   ├── User.php           # Third-party: user data API for external integrators
+│   │   └── Order.php          # Third-party: order query API for partners
 ├── common.php        # Common functions
 ├── config.php        # Main config
 ├── database.php      # DB config
 └── route.php         # Route definitions
 ```
+
+**ThinkPHP module = audience boundary**: Each module (`index/`, `admin/`, `api/`) typically serves a different audience. Controllers with the same name (e.g., `User.php`) across modules handle the same entity but for different audiences — document this difference.
 
 #### Laravel 5.x / 6.x
 ```
@@ -67,16 +87,47 @@ app/
 ├── Exceptions/
 ├── Http/
 │   ├── Controllers/
+│   │   ├── UserController.php         # Frontend: user CRUD for web/mobile
+│   │   ├── Api/
+│   │   │   └── UserController.php     # Third-party: user data for external API
+│   │   └── Admin/
+│   │       └── UserController.php     # Admin: user management for admin panel
 │   ├── Middleware/
 │   └── Requests/
 ├── Models/           # May be directly in app/ in Laravel 5.x
 ├── Providers/
-└── Services/         # Custom, not part of default structure
+├── Services/         # Custom, not part of default structure
+│   ├── UserService.php            # API-layer: user business logic
+│   ├── PaymentService.php         # Integration: wraps payment provider
+│   └── NotificationService.php   # Internal-utility: handles email/SMS
+├── Jobs/             # Scheduled-task / queue workers
+│   └── SyncOrderJob.php          # Scheduled-task: sync orders from external
+└── Listeners/
+    └── PaymentReceivedListener.php # Webhook: handles payment callback
 config/
 database/migrations/
 resources/views/
 routes/
+├── api.php            # Third-party API routes (auth:api middleware)
+├── web.php            # Frontend routes (session auth middleware)
+└── admin.php          # Admin routes (custom, if exists)
 ```
+
+#### File Role Detection for PHP
+
+| Clue | How to Detect | What It Means |
+|------|--------------|---------------|
+| Module directory (ThinkPHP) | `application/index/`, `application/admin/`, `application/api/` | Module = audience |
+| Route file (Laravel) | `routes/api.php` vs `routes/web.php` vs `routes/admin.php` | Route file = audience grouping |
+| Controller namespace | `App\Http\Controllers\Api\*` vs `App\Http\Controllers\Admin\*` | Namespace = audience |
+| Middleware group | `['middleware' => 'auth:api']` vs `['middleware' => 'auth']` vs `['middleware' => 'admin']` | Auth type = audience |
+| Base controller | `extends BaseApiController` vs `extends Controller` | Different behavior per audience |
+
+**Disambiguation**: When `app/Http/Controllers/UserController.php` and `app/Http/Controllers/Api/UserController.php` both exist, compare:
+- Route bindings (which route file registers them)
+- Middleware (session auth vs API token/key)
+- Response format (view vs JSON envelope)
+- Document: "`UserController` renders Blade views for frontend; `Api\UserController` returns JSON for mobile/third-party consumers"
 
 ### 2. Routing Patterns
 
@@ -272,6 +323,88 @@ Things AI will want to "fix" but should NOT (unless specifically asked):
 6. **No namespace** (very old projects) — AI must not add namespace declarations to files that don't have them.
 7. **Array-style configs** — AI will try to use object/class-based configs.
 8. **include/require files** — Some legacy projects use file inclusion instead of autoloading. Don't touch this.
+
+---
+
+## File Role & Usage Scenario Patterns
+
+When analyzing a PHP project, classify every controller and service file by its role and audience.
+
+### ThinkPHP: Module-Based Audience Separation
+
+ThinkPHP uses modules as the primary audience separator:
+```
+application/
+├── index/           # Frontend-facing (serves web users)
+│   ├── controller/
+│   │   ├── Index.php    # Homepage controller (Frontend)
+│   │   ├── User.php     # User profile for frontend (Frontend)
+│   │   └── Order.php    # Order operations for customers (Frontend)
+│   └── model/
+├── admin/           # Admin panel (serves admin users)
+│   ├── controller/
+│   │   ├── User.php     # User management for admin (Admin)
+│   │   └── Order.php    # Order management for admin (Admin)
+│   └── model/
+├── api/             # API for mobile app or third-party (Third-party/Frontend)
+│   ├── controller/
+│   │   ├── User.php     # User API (API consumers)
+│   │   └── Pay.php      # Payment API (API consumers)
+│   └── model/
+└── common/          # Shared logic (Internal-utility)
+    ├── model/
+    └── service/
+```
+
+**Key**: The same entity name (e.g., `User.php`) exists in multiple modules with different audiences. Each has different auth middleware, response format, and permission checks. Always note which module a file belongs to.
+
+### Laravel: Route File + Namespace-Based Separation
+
+**Route files determine audience:**
+| Route File | Audience | Default Middleware | URL Prefix |
+|-----------|----------|-------------------|------------|
+| `routes/web.php` | Frontend | `web` (session, CSRF) | `/` |
+| `routes/api.php` | API consumers | `api` (stateless, throttle) | `/api` |
+| `routes/admin.php` | Admin | `web` + `auth:admin` | `/admin` |
+| `routes/channels.php` | WebSocket | `auth` | broadcast channels |
+
+**Controller namespace separation:**
+```
+app/Http/Controllers/
+├── UserController.php           # Frontend (routes/web.php)
+├── Api/
+│   ├── UserController.php       # API consumers (routes/api.php)
+│   └── V2/
+│       └── UserController.php   # API v2 (versioned API)
+├── Admin/
+│   └── UserController.php       # Admin panel (routes/admin.php)
+└── Webhook/
+    └── PaymentController.php    # Webhook receiver (payment callback)
+```
+
+**Service layer disambiguation:**
+| File | Role | Clues |
+|------|------|-------|
+| `app/Services/UserService.php` | API-layer service | Called by controllers |
+| `app/Services/PaymentGatewayService.php` | Integration service | Calls third-party payment SDK |
+| `app/Jobs/SyncOrderJob.php` | Scheduled task / queue worker | Implements `ShouldQueue` |
+| `app/Listeners/OrderPaidListener.php` | Event-driven | Listens to `OrderPaid` event |
+| `app/Console/Commands/CleanExpiredTokens.php` | Scheduled task | Registered in `Kernel.php` schedule |
+
+### Detection Commands
+```bash
+# ThinkPHP: List all modules and their controllers
+find application/ -name "*.php" -path "*/controller/*" | sort
+
+# Laravel: List all route files and their prefixes
+grep -rn "Route::group\|Route::prefix\|Route::middleware" routes/ | head -20
+
+# Laravel: List controller namespaces
+find app/Http/Controllers -name "*.php" | sort
+
+# Find auth middleware differences
+grep -rn "middleware.*auth\|middleware.*admin\|middleware.*api" routes/ | head -20
+```
 
 ---
 

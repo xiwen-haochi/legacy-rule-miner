@@ -75,17 +75,42 @@ grep -rn "async function\|await " --include="*.js" --include="*.ts" | wc -l
 
 ### 3. Project Structure
 
+#### Files to Exclude from Code Style Analysis
+Skip these when sampling conventions:
+- `node_modules/` — dependencies
+- `dist/`, `build/`, `.next/`, `.nuxt/` — compiled / bundled output
+- `coverage/` — test coverage reports
+- `*.min.js`, `*.bundle.js`, `*.map` — minified / sourcemap files
+- `public/` — static assets (unless server-rendered)
+- `migrations/` or `db/migrate/` — DB migration files (read for schema only)
+- `*.d.ts` — TypeScript declaration files (read for type info, not code style)
+
 #### Express
 ```
 project/
 ├── app.js / server.js / index.js   # Entry point
 ├── routes/
-│   ├── index.js
-│   └── users.js
+│   ├── index.js                    # Frontend: homepage routes
+│   ├── users.js                    # Frontend: user routes for web/mobile
+│   ├── api/
+│   │   └── users.js                # Third-party: user API for external integrators
+│   └── admin/
+│       └── users.js                # Admin: user management for admin panel
 ├── controllers/                     # Sometimes combined with routes
+│   ├── userController.js           # Frontend: user business handler
+│   └── apiUserController.js        # Third-party: API user handler
 ├── middleware/
+│   ├── auth.js                     # Auth: session-based auth for frontend
+│   └── apiAuth.js                  # Auth: API key auth for third-party
 ├── models/
+│   ├── User.js                     # Data access: user model
+│   └── Order.js                    # Data access: order model
 ├── services/                        # Sometimes called "logic"
+│   ├── userService.js              # API-layer: user business logic
+│   ├── paymentService.js           # Integration: wraps payment provider
+│   └── notificationService.js     # Internal-utility: email/SMS sender
+├── jobs/ or tasks/
+│   └── syncOrders.js               # Scheduled-task: cron job for order sync
 ├── utils/ or helpers/
 ├── config/
 ├── public/                          # Static files
@@ -97,7 +122,11 @@ project/
 project/
 ├── app.js
 ├── routes/
+│   ├── index.js                    # Frontend: web routes
+│   └── api.js                      # Third-party: API routes
 ├── controllers/
+│   ├── userController.js           # Frontend: user handler for web
+│   └── apiController.js            # Third-party: API handler
 ├── middleware/
 ├── models/
 ├── services/
@@ -109,9 +138,17 @@ project/
 project/
 ├── app/
 │   ├── controller/
+│   │   ├── home.js                  # Frontend: homepage for web visitors
+│   │   ├── user.js                  # Frontend: user operations for web/mobile
+│   │   └── api/
+│   │       └── user.js              # Third-party: user API for external integrators
 │   ├── service/
+│   │   ├── user.js                  # API-layer: user business logic
+│   │   └── payment.js               # Integration: wraps payment provider
 │   ├── middleware/
 │   ├── model/                       # If egg-sequelize
+│   ├── schedule/                    # Scheduled-task: cron jobs
+│   │   └── syncOrder.js             # Scheduled-task: sync orders
 │   ├── router.js
 │   └── extend/
 │       ├── helper.js
@@ -125,6 +162,42 @@ project/
 ```
 
 **Key**: Egg.js has strict conventions about file placement. If it's Egg, these conventions are mandatory rules.
+
+#### NestJS (if detected)
+```
+project/
+├── src/
+│   ├── main.ts
+│   ├── app.module.ts
+│   ├── users/
+│   │   ├── users.controller.ts      # Frontend: user CRUD for web/mobile
+│   │   ├── users.service.ts         # API-layer: user business logic
+│   │   ├── users.module.ts
+│   │   └── dto/
+│   ├── api/
+│   │   └── api-users.controller.ts  # Third-party: user data for external API
+│   └── admin/
+│       └── admin-users.controller.ts # Admin: user management
+├── dist/                             # Compiled output — EXCLUDE
+└── test/
+```
+
+#### File Role Detection for Node.js
+
+| Clue | How to Detect | What It Means |
+|------|--------------|---------------|
+| Route file name | `routes/api.js` vs `routes/web.js` vs `routes/admin.js` | Route file = audience |
+| Route prefix | `router.use('/api/v1', apiRouter)`, `router.use('/admin', adminRouter)` | URL prefix = audience |
+| Middleware stack | `router.use(sessionAuth)` vs `router.use(apiKeyAuth)` | Auth type = audience |
+| Directory structure | `controllers/api/` vs `controllers/admin/` vs `controllers/` | Directory = audience |
+| NestJS module | `@Controller('api/users')` vs `@Controller('admin/users')` | Decorator prefix = audience |
+| File naming | `apiUserController.js` vs `userController.js` | Name prefix = audience hint |
+
+**Disambiguation example**: When both `routes/api.js` and `routes/users.js` handle user endpoints:
+- Compare route prefixes (`/api/v1/users` vs `/users`)
+- Compare middleware (API key vs session)
+- Compare response format (JSON API envelope vs server-rendered or different JSON structure)
+- Document: "`routes/api.js` exposes user data for third-party integration with API key auth; `routes/users.js` serves user pages for the frontend with session auth"
 
 ### 4. Database / ORM Patterns
 
@@ -280,6 +353,117 @@ Things AI will want to "fix" but should NOT:
 8. **String concatenation** — AI will use template literals. Only if the file already uses them.
 9. **No error handling in .then()** — AI will add .catch(). Follow the project's pattern for this.
 10. **Global state** — Some Node.js projects use global variables or module-level state. Don't try to refactor this into dependency injection.
+
+---
+
+## File Role & Usage Scenario Patterns
+
+When analyzing a Node.js project, classify every route/controller and service file by its role and audience.
+
+### Express: Router Mounting Determines Audience
+
+**Route file separation:**
+```javascript
+// app.js — different routers for different audiences
+app.use('/api/v1', apiRouter);        // Third-party API (API key auth)
+app.use('/admin', adminRouter);       // Admin panel (admin session auth)
+app.use('/', webRouter);              // Frontend (session auth)
+app.use('/webhook', webhookRouter);   // Webhook (signature verification)
+app.use('/internal', internalRouter); // Internal microservice (service token)
+```
+
+**File structure by audience:**
+```
+routes/
+├── api/
+│   ├── index.js         # API router registration (Third-party)
+│   ├── users.js         # User API endpoints
+│   └── orders.js        # Order API endpoints
+├── admin/
+│   ├── index.js         # Admin router registration (Admin)
+│   └── users.js         # User management
+├── web/
+│   ├── index.js         # Web router registration (Frontend)
+│   └── users.js         # User pages
+└── webhook/
+    └── payment.js       # Payment callback handler (Webhook)
+```
+
+**Middleware stacking differences between audiences:**
+| Audience | Typical Middleware Stack |
+|----------|------------------------|
+| Frontend | `session`, `csrf`, `passport.session()` |
+| API | `cors`, `rateLimit`, `apiKeyAuth` or `jwt` |
+| Admin | `session`, `adminAuth`, `rbac` |
+| Webhook | `rawBody` (for signature), `webhookVerify` |
+| Internal | `serviceToken` or IP whitelist |
+
+### Koa: Router Prefix-Based Separation
+
+```javascript
+const apiRouter = new Router({ prefix: '/api/v1' });   // Third-party
+const adminRouter = new Router({ prefix: '/admin' });  // Admin
+const webRouter = new Router({ prefix: '/' });         // Frontend
+```
+
+### Egg.js: router.js Route Grouping
+
+```javascript
+// app/router.js — grouping reveals audience
+module.exports = app => {
+  const { router, controller } = app;
+
+  // Frontend
+  router.get('/home', controller.home.index);
+  router.get('/user/profile', controller.user.profile);
+
+  // API (for mobile app)
+  router.post('/api/v1/user/login', controller.api.user.login);
+  router.get('/api/v1/orders', controller.api.order.list);
+
+  // Admin
+  router.get('/admin/users', controller.admin.user.list);
+};
+```
+
+**Egg.js controller directory structure:**
+```
+app/controller/
+├── home.js              # Frontend: homepage (Frontend)
+├── user.js              # Frontend: user pages (Frontend)
+├── api/
+│   ├── user.js          # API: user endpoints (API consumers)
+│   └── order.js         # API: order endpoints (API consumers)
+└── admin/
+    ├── user.js          # Admin: user management (Admin)
+    └── dashboard.js     # Admin: dashboard (Admin)
+```
+
+### Service Layer Disambiguation
+
+| File | Role | Clues |
+|------|------|-------|
+| `services/userService.js` | API-layer | Called by controllers, handles business logic |
+| `services/paymentService.js` | Integration | Calls third-party payment API (Stripe, PayPal, etc.) |
+| `services/emailService.js` | Internal-utility | Sends emails via SMTP/SES, called by multiple services |
+| `schedule/syncOrders.js` | Scheduled-task | Egg.js scheduled task or node-cron job |
+| `mq/orderConsumer.js` | Event-driven | RabbitMQ/Kafka consumer, bull queue processor |
+| `utils/smsHelper.js` | Internal-utility | Wraps SMS provider SDK |
+
+### Detection Commands
+```bash
+# Find all route files
+find . -path "*/route*" -name "*.js" -o -path "*/router*" -name "*.js" | sort
+
+# Check router mounting and prefixes
+grep -rn "app.use.*Router\|router.prefix\|app.use.*router" --include="*.js" | head -20
+
+# Find middleware stacking per route group
+grep -rn "router.use.*auth\|middleware.*auth\|app.use.*session" --include="*.js" | head -20
+
+# Find scheduled tasks
+grep -rn "schedule\|node-cron\|bull\|agenda" --include="*.js" package.json | head -10
+```
 
 ---
 

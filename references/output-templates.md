@@ -1,11 +1,13 @@
 # Output Templates
 
-Templates for the single-file `.rules.md` and module-specific `.rules-{module}.md` files.
+Templates for `legacy-rules.md` and module-specific `legacy-rules-{module}.md` files.
 Use these as the skeleton during Step 4.
+
+The output directory is determined by IDE auto-detection (see SKILL.md "Output Location" section).
 
 ---
 
-## Main File: `.rules.md`
+## Main File: `legacy-rules.md`
 
 ```markdown
 # {Project Name} — AI Coding Rules
@@ -48,12 +50,55 @@ Use these as the skeleton during Step 4.
 
 ### Project Structure
 ```
-[Simplified directory tree showing the layer structure]
+[Simplified directory tree showing the layer structure, with per-file role annotations]
 ```
+
+Example:
+```
+src/
+├── controllers/
+│   ├── api/
+│   │   ├── UserApiController     # Third-party: user data API for external integrators
+│   │   └── OrderApiController    # Third-party: order query API for partners
+│   ├── web/
+│   │   ├── UserController        # Frontend: user management for web/mobile clients
+│   │   └── OrderController       # Frontend: order operations for web/mobile clients
+│   └── admin/
+│       └── UserAdminController   # Admin: user management for admin panel
+├── services/
+│   ├── UserService               # API-layer: user business logic
+│   ├── PaymentGatewayService     # Integration: wraps third-party payment API
+│   └── NotificationService       # Internal-utility: shared notification sender
+└── repositories/
+    ├── UserRepository            # Data access: user table CRUD
+    └── OrderRepository           # Data access: order table CRUD
+```
+
+### File Role Map
+
+| File | Layer | Role | Audience | Notes |
+|------|-------|------|----------|-------|
+| `controllers/api/UserApiController` | Controller | User data query API | Third-party | API key auth, different response envelope |
+| `controllers/web/UserController` | Controller | User CRUD for frontend | Frontend | Session auth, standard response format |
+| `controllers/admin/UserAdminController` | Controller | User management | Admin | Admin RBAC, extra audit logging |
+| `services/UserService` | Service | User business logic | API-layer | Called by all user controllers |
+| `services/PaymentGatewayService` | Service | Payment provider integration | Integration | Has retry + timeout config |
+| `services/NotificationService` | Service | Send notifications | Internal-utility | Called by multiple services |
+| `tasks/OrderSyncTask` | Service | Sync orders from external system | Scheduled-task | Runs every 30min via cron |
+| `listeners/PaymentCallbackHandler` | Handler | Payment result webhook | Webhook | Signature verification required |
+
+[Replace the above with actual project files. Every code file in the layer directories must appear in this table.]
 
 ### Layer Rules
 #### [Layer name, e.g., Controller Layer]
 **MUST**: [Where controllers live, what they can/cannot do]
+
+#### [Layer name with sub-types, e.g., Controller Layer — Frontend]
+**MUST**: [Where frontend-facing controllers live, their base class, auth middleware, response format]
+
+#### [Layer name with sub-types, e.g., Controller Layer — Open API]
+**MUST**: [Where third-party API controllers live, their base class, auth middleware, response format]
+**MUST**: [How Open API controllers differ from frontend controllers]
 
 #### [Layer name, e.g., Service Layer]
 **MUST**: [Where services live, what they can/cannot do]
@@ -342,10 +387,10 @@ These files/modules should not be modified without extreme caution:
 
 ### Minimum Requirements Checklist
 
-Before finalizing `.rules.md`, verify:
+Before finalizing `legacy-rules.md`, verify:
 
 - [ ] **Project Overview**: Language + version, Framework + version, at least one build command, ≥5 key dependencies with versions
-- [ ] **Architecture**: Layer pattern identified, dependency direction stated, "where to put new code" with path patterns, ≥2 prohibited patterns
+- [ ] **Architecture**: Layer pattern identified, dependency direction stated, "where to put new code" with path patterns, ≥2 prohibited patterns, **file role map with audience annotation for all key code files**
 - [ ] **Naming Conventions**: ≥3 class types with naming patterns, method naming for CRUD, DB naming, real project examples
 - [ ] **Coding Patterns**: Error handling with DO/DON'T code, logging convention, import/alias conventions, constant definition rules, ≥3 patterns with real code
 - [ ] **API Design**: URL pattern with examples, response envelope format, ≥3 real endpoint examples
@@ -357,12 +402,12 @@ Before finalizing `.rules.md`, verify:
 
 ---
 
-## Module-Specific File: `.rules-{module}.md`
+## Module-Specific File: `legacy-rules-{module}.md`
 
 ```markdown
 # {Module Name} — Module-Level AI Coding Rules
 
-> This file supplements the main rule file `.rules.md`. All main rules remain in effect unless explicitly overridden below.
+> This file supplements the main rule file `legacy-rules.md`. All main rules remain in effect unless explicitly overridden below.
 
 ## Module Overview
 [What this module does, its importance, risk level]
@@ -393,7 +438,7 @@ Before finalizing `.rules.md`, verify:
 
 ## Incremental Update Guide
 
-When `.rules.md` already exists:
+When `legacy-rules.md` already exists:
 
 1. **Read the existing file** — Parse sections by `## ` headers
 2. **Identify user-maintained sections** — `## Custom Rules` and any `<!-- custom -->` marked blocks
@@ -401,6 +446,6 @@ When `.rules.md` already exists:
 4. **Preserve user sections** — Copy `## Custom Rules` content verbatim into the updated file
 5. **Show diff summary** — Tell the user what changed (new rules added, modified rules, removed rules)
 
-When `.rules-{module}.md` already exists:
+When `legacy-rules-{module}.md` already exists:
 - Same approach: update auto-generated content, preserve `## Custom Rules`
 - If the module no longer needs special rules, ask the user before deleting the file

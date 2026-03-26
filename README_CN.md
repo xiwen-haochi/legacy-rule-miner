@@ -26,23 +26,73 @@
 
 ## 输出
 
-在项目根目录生成单个规则文件（按维度分章节）：
+自动检测 IDE 类型，将规则文件生成到对应 IDE 的原生规则目录中：
+
+| IDE/工具 | 输出目录 |
+|---------|----------|
+| Cursor | `.cursor/rules/` |
+| Trae | `.trae/rules/` |
+| GitHub Copilot (VS Code) | `.github/instructions/` |
+| Claude Code | `.claude/rules/` |
+| Windsurf | `.windsurf/rules/` |
+| 未知 / 兜底 | `.ruleminer/` |
 
 ```
-<project-root>/
-├── .rules.md              # 主规则文件（项目概览 / 架构 / 命名 / 编码 / API / 数据 / 安全 / 依赖 / 坑点 / 自定义规则）
-├── .rules-payment.md      # 模块级规则（仅在模块有特殊约定时生成）
-└── .rules-auth.md         # 模块级规则（仅在模块有特殊约定时生成）
+{output-dir}/
+├── legacy-rules.md              # 主规则文件（项目概览 / 架构 / 命名 / 编码 / API / 数据 / 安全 / 依赖 / 坑点 / 自定义规则）
+├── legacy-rules-payment.md      # 模块级规则（仅在模块有特殊约定时生成）
+└── legacy-rules-auth.md         # 模块级规则（仅在模块有特殊约定时生成）
 ```
 
 特性：
 - 文件末尾保留 `## 自定义规则` 专区，用户可手动补充规则，重新生成时不会覆盖
-- 已有 `.rules.md` 时进行增量更新，而非全量覆盖
+- 已有 `legacy-rules.md` 时进行增量更新，而非全量覆盖
 - 模块级规则已存在则更新，不存在则新建
+
+## 安装
+
+### 通过 skills.sh 安装（推荐）
+
+在终端运行：
+
+```bash
+npx skills add xiwen-haochi/legacy-rule-miner
+```
+
+会自动将 Skill 安装到你 IDE 的技能目录中。
+
+### 手动安装
+
+1. 克隆仓库：
+   ```bash
+   git clone https://github.com/xiwen-haochi/legacy-rule-miner.git
+   ```
+2. 将整个文件夹复制到你 IDE 的技能目录：
+   - **VS Code (Copilot):** `<项目根目录>/.github/skills/legacy-rule-miner/`
+   - **Cursor:** `<项目根目录>/.cursor/skills/legacy-rule-miner/`
+   - **Claude Code:** `<项目根目录>/.agents/skills/legacy-rule-miner/`
 
 ## 使用方式
 
-在 AI 编程 IDE 中，将此 Skill 指向你的老项目，运行分析即可。生成的 `.rules.md` 可直接复制到 `.copilot-instructions.md`、`.cursorrules`、`CLAUDE.md` 等 AI 配置文件中。
+### 快速开始
+
+1. **在 AI 编程 IDE 中打开你的老项目**（VS Code + Copilot / Cursor / Claude Code）
+2. **确保 Skill 已安装**（见上方安装步骤）
+3. **开始对话**，让 AI 分析你的项目：
+   ```
+   分析这个老项目，生成 legacy-rules.md
+   ```
+4. Skill 会自动执行：
+   - 自动检测 IDE 类型，选择对应的输出目录
+   - 扫描项目结构、配置、依赖、源代码（~80% 自动完成）
+   - 向你提问口头约定、已知坑点、业务约束等信息（~20% 交互补充）
+   - 在 IDE 原生规则目录中生成 `legacy-rules.md`
+
+### 重新运行 / 更新
+
+- 如果 `legacy-rules.md` 已存在，Skill 会进行**增量更新**，只更新有变化的章节
+- 文件末尾的 `## 自定义规则` 专区**永远不会被覆盖**，你手动添加的规则是安全的
+- 如需完全重新生成，删除 `legacy-rules.md` 后重新运行即可
 
 ## 五大核心原则
 

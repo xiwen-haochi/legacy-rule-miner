@@ -32,6 +32,16 @@ grep -i "gin-gonic\|gorilla/mux\|chi\|echo\|beego\|iris\|fiber" go.mod go.sum 2>
 
 ### 1. Project Structure
 
+#### Files to Exclude from Code Style Analysis
+Skip these when sampling conventions:
+- `vendor/` — vendored dependencies (if `go.mod` exists, prefer modules)
+- Compiled binaries (files with no extension in `cmd/` output dirs)
+- `*.test` — test binaries
+- `*_gen.go`, `*.pb.go` — generated code (protobuf, codegen)
+- `*_mock.go`, `mock_*.go` — generated mocks
+- `docs/`, `swagger/` — generated API docs
+- `tmp/`, `.air/` — hot-reload temp files
+
 ```bash
 # Common Go project layouts
 ls -la cmd/ internal/ pkg/ api/ 2>/dev/null
@@ -44,11 +54,57 @@ ls -la cmd/ internal/ pkg/ api/ 2>/dev/null
 | cmd + domain dirs | DDD-inspired — `cmd/`, `user/`, `order/` |
 | MVC-like | `controllers/`, `models/`, `services/` |
 
+**Standard Go project layout with role annotations:**
+```
+project/
+├── cmd/
+│   └── server/
+│       └── main.go                    # Entry point: HTTP server bootstrap
+├── internal/
+│   ├── handler/ or controller/
+│   │   ├── user_handler.go            # Frontend: user CRUD for web/mobile
+│   │   ├── api_user_handler.go        # Third-party: user API for external integrators
+│   │   └── admin_user_handler.go      # Admin: user management for admin panel
+│   ├── service/
+│   │   ├── user_service.go            # API-layer: user business logic
+│   │   ├── payment_service.go         # Integration: wraps payment provider
+│   │   └── notification_service.go   # Internal-utility: email/SMS sender
+│   ├── repository/ or dao/
+│   │   ├── user_repo.go               # Data access: user table CRUD
+│   │   └── order_repo.go              # Data access: order table CRUD
+│   ├── model/ or entity/
+│   ├── middleware/
+│   │   ├── auth.go                    # Auth: session/JWT auth for frontend
+│   │   └── api_key.go                 # Auth: API key auth for third-party
+│   └── cron/ or task/
+│       └── sync_orders.go             # Scheduled-task: order sync via cron
+├── pkg/                               # Shared libraries (importable by others)
+├── api/                               # Protocol definitions (protobuf, OpenAPI)
+├── configs/
+└── go.mod
+```
+
 Check:
 - [ ] Is `internal/` used? (package visibility constraint)
 - [ ] `cmd/` for multiple binaries?
 - [ ] `pkg/` for shared libraries?
 - [ ] `api/` for protocol definitions (protobuf, OpenAPI)?
+
+#### File Role Detection for Go
+
+| Clue | How to Detect | What It Means |
+|------|--------------|---------------|
+| Route group prefix | `r.Group("/api/v1")` vs `r.Group("/admin")` (Gin) | Route group = audience |
+| Middleware binding | `group.Use(AuthMiddleware)` vs `group.Use(ApiKeyMiddleware)` | Auth type = audience |
+| Handler file name | `api_user_handler.go` vs `user_handler.go` vs `admin_handler.go` | Name prefix = audience |
+| Package location | `internal/handler/api/` vs `internal/handler/admin/` | Package = audience |
+| Response struct | `type ApiResponse struct` vs `type Response struct` | Different envelopes per audience |
+
+**Disambiguation example**: When both `user_handler.go` and `api_user_handler.go` exist:
+- Compare route group prefixes (`/users` vs `/api/v1/users`)
+- Compare middleware (session vs API key)
+- Compare response structs
+- Document: "`user_handler.go` serves frontend via session auth with `Response` struct; `api_user_handler.go` exposes data to third-party via API key with `ApiResponse` struct"
 
 ### 2. Error Handling Pattern
 
@@ -246,6 +302,122 @@ Things AI will want to "fix" but should NOT:
 6. **Interface declarations with implementations** — AI may move interfaces to consumer packages. Follow the project's convention.
 7. **Large switch statements** — AI will try to refactor into strategy pattern. Don't in Go.
 8. **context.TODO()** — AI will try to replace with proper context. Only if there's a pattern for it in the project.
+
+---
+
+## File Role & Usage Scenario Patterns
+
+When analyzing a Go project, classify every handler/controller and service file by its role and audience.
+
+### Handler/Route Group-Based Audience Separation
+
+**By directory structure:**
+```
+internal/
+├── handler/
+│   ├── api/
+│   │   ├── user.go          # Third-party API: user data for external apps
+│   │   └── order.go         # Third-party API: order query for partners
+│   ├── web/
+│   │   ├── user.go          # Frontend: user operations for web/mobile SPA
+│   │   └── order.go         # Frontend: order operations for web/mobile SPA
+│   ├── admin/
+│   │   └── user.go          # Admin: user management for admin panel
+│   └── webhook/
+│       └── payment.go       # Webhook: payment callback handler
+├── service/
+│   ├── user.go              # API-layer service: user business logic
+│   ├── payment.go           # Integration service: wraps payment gateway
+│   └── notification.go      # Internal-utility: sends notifications
+└── repository/
+    ├── user.go              # Data access: user table
+    └── order.go             # Data access: order table
+```
+
+**By route group (Gin example):**
+```go
+// Router setup reveals audience
+r := gin.Default()
+
+// Frontend (session/JWT auth)
+web := r.Group("/", sessionMiddleware)
+{
+    web.GET("/users", handler.ListUsers)
+    web.POST("/orders", handler.CreateOrder)
+}
+
+// Third-party API (API key auth)
+api := r.Group("/api/v1", apiKeyMiddleware)
+{
+    api.GET("/users", apiHandler.GetUsers)
+    api.GET("/orders", apiHandler.GetOrders)
+}
+
+// Admin (admin auth)
+admin := r.Group("/admin", adminAuthMiddleware)
+{
+    admin.GET("/users", adminHandler.ListUsers)
+}
+
+// Webhook (signature verification)
+webhook := r.Group("/webhook", signatureMiddleware)
+{
+    webhook.POST("/payment", webhookHandler.PaymentCallback)
+}
+```
+
+### Multiple Binary Disambiguation (cmd/ directory)
+
+Projects with multiple `cmd/` binaries serve different audiences:
+```
+cmd/
+├── api/              # HTTP API server (frontned + third-party)
+│   └── main.go
+├── admin/            # Admin server (admin panel)
+│   └── main.go
+├── worker/           # Queue consumer (scheduled-task/worker)
+│   └── main.go
+├── cron/             # Cron job runner (scheduled-task)
+│   └── main.go
+└── grpc/             # gRPC server (internal-service)
+    └── main.go
+```
+
+### gRPC vs HTTP Handler Distinction
+
+| Type | Audience | Clues |
+|------|----------|-------|
+| HTTP handler | Frontend / Third-party | `gin.Context`, `http.ResponseWriter`, JSON response |
+| gRPC service | Internal-service | `pb.UnimplementedXxxServer`, protobuf messages |
+| gRPC-Gateway | External API | `grpc-gateway` plugin, HTTP→gRPC translation |
+
+### Service Layer Disambiguation
+
+| File | Role | Clues |
+|------|------|-------|
+| `service/user.go` | API-layer | `func (s *UserService) Create(ctx, req)`, called by handlers |
+| `service/payment.go` | Integration | Calls third-party HTTP API, has retry/timeout |
+| `service/sms.go` | Internal-utility | Wraps SMS provider SDK |
+| `cron/sync_orders.go` | Scheduled-task | Uses `robfig/cron` or called by `cmd/cron/main.go` |
+| `consumer/order_consumer.go` | Event-driven | Reads from message queue (NSQ, Kafka, RabbitMQ) |
+
+### Detection Commands
+```bash
+# Find all handler/controller files
+find . -path "*/handler*" -o -path "*/controller*" -o -path "*/api*" | grep "\.go$" | sort
+
+# Find route groups and their prefixes
+grep -rn "Group(\|GET(\|POST(\|Handle(" --include="*.go" | grep -i "route\|router\|group" | head -20
+
+# Find multiple binaries
+ls -la cmd/*/main.go 2>/dev/null
+
+# Find gRPC services
+grep -rn "pb\.Unimplemented\|RegisterXxx" --include="*.go" | head -10
+
+# Find scheduled tasks and queue consumers
+grep -rn "cron\.\|AddFunc\|Consume\|Subscribe" --include="*.go" | head -10
+```
 
 ---
 

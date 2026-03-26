@@ -33,6 +33,17 @@ grep "netcoreapp\|net5\|net6\|net7\|net8" *.csproj **/*.csproj 2>/dev/null
 
 ### 1. Project Structure
 
+#### Files to Exclude from Code Style Analysis
+Skip these when sampling conventions (still read migration files for schema info):
+- `bin/`, `obj/` — compiled output
+- `Migrations/` — EF Core auto-generated migrations (read for schema only)
+- `*.Designer.cs` — auto-generated designer files
+- `*.AssemblyInfo.cs` — assembly metadata
+- `*.g.cs`, `*.generated.cs` — source-generated code
+- `packages/` — NuGet packages (legacy format)
+- `wwwroot/` — static web assets
+- `Properties/launchSettings.json` — local dev settings
+
 ```bash
 # Find solution and project files
 find . -name "*.sln" -o -name "*.csproj" | head -20
@@ -45,10 +56,18 @@ Solution/
 ├── src/
 │   ├── Project.Api/              # Web API project
 │   │   ├── Controllers/
+│   │   │   ├── UsersController.cs        # Frontend: user CRUD for web/mobile
+│   │   │   ├── Api/
+│   │   │   │   └── UsersApiController.cs # Third-party: user data API for external
+│   │   │   └── Admin/
+│   │   │       └── UsersAdminController.cs # Admin: user management for admin panel
 │   │   ├── Program.cs
 │   │   └── Startup.cs            # .NET Core 2.x/3.x (merged into Program.cs in 6+)
 │   ├── Project.Application/      # Business logic
 │   │   ├── Services/
+│   │   │   ├── UserService.cs            # API-layer: user business logic
+│   │   │   ├── PaymentGatewayService.cs  # Integration: wraps payment provider
+│   │   │   └── NotificationService.cs   # Internal-utility: email/SMS sender
 │   │   ├── DTOs/
 │   │   └── Interfaces/
 │   ├── Project.Domain/           # Domain models
@@ -57,7 +76,11 @@ Solution/
 │   └── Project.Infrastructure/   # Data access, external services
 │       ├── Data/
 │       ├── Repositories/
-│       └── Migrations/
+│       │   ├── UserRepository.cs         # Data access: user table CRUD
+│       │   └── OrderRepository.cs        # Data access: order table CRUD
+│       ├── Migrations/                   # EF Core migrations — EXCLUDE from style
+│       └── Jobs/
+│           └── OrderSyncJob.cs           # Scheduled-task: background order sync
 └── tests/
     └── Project.Tests/
 ```
@@ -66,6 +89,23 @@ Check:
 - [ ] Solution structure: mono-project vs multi-project
 - [ ] Clean Architecture / Onion Architecture layers?
 - [ ] Project reference dependencies
+
+#### File Role Detection for .NET
+
+| Clue | How to Detect | What It Means |
+|------|--------------|---------------|
+| Route attribute | `[Route("api/v1/[controller]")]` vs `[Route("admin/[controller]")]` | Route prefix = audience |
+| Controller base class | `: ControllerBase` vs `: Controller` (MVC with views) | API vs MVC |
+| Authorization attribute | `[Authorize(Policy = "ApiKey")]` vs `[Authorize(Roles = "Admin")]` | Auth type = audience |
+| Area attribute | `[Area("Admin")]`, `[Area("Api")]` | .NET MVC area = audience |
+| Namespace | `Controllers.Api` vs `Controllers.Admin` vs `Controllers` | Namespace = audience |
+| API versioning | `[ApiVersion("1.0")]` | Versioned API = likely external |
+
+**Disambiguation example**: When both `UsersController.cs` and `UsersApiController.cs` exist:
+- Compare `[Route]` attributes (`/users` vs `/api/v1/users`)
+- Compare `[Authorize]` policies (cookie auth vs API key/bearer)
+- Compare return types (`IActionResult` with views vs `ActionResult<T>` with JSON)
+- Document: "`UsersController` serves MVC views for frontend via cookie auth; `UsersApiController` returns JSON for external integrators via bearer token"
 
 ### 2. Startup / Host Configuration
 
@@ -229,6 +269,121 @@ Things AI will want to "fix" but should NOT:
 8. **Record types** — Only for C# 9+ (.NET 5+).
 9. **Primary constructors** — Only for C# 12 (.NET 8).
 10. **File-scoped namespaces** — Only for C# 10 (.NET 6+).
+
+---
+
+## File Role & Usage Scenario Patterns
+
+When analyzing a .NET project, classify every controller and service file by its role and audience.
+
+### Controller Separation by Route Attribute
+
+**By directory / namespace:**
+```
+Project.Api/Controllers/
+├── UsersController.cs           # Frontend: user CRUD for SPA/mobile (JWT auth)
+├── OrdersController.cs          # Frontend: order operations for SPA/mobile
+├── Admin/
+│   ├── UsersController.cs       # Admin: user management for admin panel
+│   └── DashboardController.cs   # Admin: dashboard data
+├── OpenApi/
+│   ├── UsersController.cs       # Open API: user data for third-party integrators
+│   └── OrdersController.cs      # Open API: order query for partners
+├── Internal/
+│   └── SyncController.cs        # Internal: service-to-service communication
+└── Webhooks/
+    └── PaymentController.cs     # Webhook: payment callback from Stripe/PayPal
+```
+
+**By route attribute prefix:**
+```csharp
+[Route("api/users")]        // Frontend API
+[Route("admin/users")]      // Admin panel
+[Route("open/v1/users")]    // Third-party Open API
+[Route("internal/sync")]    // Internal microservice
+[Route("webhook/payment")]  // Webhook receiver
+```
+
+**By auth policy:**
+```csharp
+[Authorize]                          // Frontend — standard JWT/cookie auth
+[Authorize(Policy = "AdminOnly")]    // Admin — admin role required
+[Authorize(Policy = "ApiKey")]       // Open API — API key auth
+[AllowAnonymous]                     // Webhook — no auth, signature verification instead
+[Authorize(AuthenticationSchemes = "ServiceToken")]  // Internal — service-to-service
+```
+
+### Area-Based Separation
+
+.NET MVC Areas provide physical separation by audience:
+```
+Areas/
+├── Admin/
+│   ├── Controllers/
+│   │   └── UsersController.cs   # Admin audience
+│   └── Views/
+└── Api/
+    └── Controllers/
+        └── UsersController.cs   # API audience
+```
+
+### Multi-Project Solution Separation
+
+Clean Architecture solutions may separate by project:
+```
+src/
+├── Project.Api/              # Frontend + API controllers
+├── Project.AdminApi/         # Admin controllers (separate deployment)
+├── Project.WorkerService/    # Background worker (queue consumer, scheduled tasks)
+├── Project.Application/      # Shared business logic
+├── Project.Domain/           # Domain models
+└── Project.Infrastructure/   # Data access, external integrations
+```
+
+### Service Layer Disambiguation
+
+| File | Role | Clues |
+|------|------|-------|
+| `Application/Services/UserService.cs` | API-layer | Called by controllers via `IUserService` |
+| `Infrastructure/ExternalServices/PaymentGateway.cs` | Integration | Calls Stripe/PayPal API via `HttpClient` |
+| `Infrastructure/ExternalServices/SmsService.cs` | Internal-utility | Sends SMS via Twilio/Aliyun |
+| `WorkerService/Workers/OrderSyncWorker.cs` | Scheduled-task | `BackgroundService`, processes queue |
+| `Application/EventHandlers/OrderPaidHandler.cs` | Event-driven | MediatR `INotificationHandler<OrderPaid>` |
+
+### Minimal API Endpoint Grouping (.NET 6+)
+
+```csharp
+// Program.cs — MapGroup reveals audience
+var api = app.MapGroup("/api/v1").RequireAuthorization();
+api.MapGet("/users", GetUsers);              // Frontend API
+
+var admin = app.MapGroup("/admin").RequireAuthorization("AdminOnly");
+admin.MapGet("/users", AdminGetUsers);       // Admin
+
+var webhook = app.MapGroup("/webhook").AllowAnonymous();
+webhook.MapPost("/payment", HandlePayment);  // Webhook
+```
+
+### Detection Commands
+```bash
+# Find all controller files
+find . -name "*Controller.cs" | sort
+
+# Check route prefixes
+grep -rn '\[Route(' --include="*.cs" | head -30
+
+# Find auth policies per controller
+grep -rn '\[Authorize' --include="*.cs" | head -20
+
+# Find Areas
+find . -path "*/Areas/*" -name "*.cs" | sort
+
+# Find background workers
+grep -rn "BackgroundService\|IHostedService\|Worker" --include="*.cs" | head -10
+
+# Find MediatR handlers
+grep -rn "IRequestHandler\|INotificationHandler" --include="*.cs" | head -10
+```
 
 ---
 

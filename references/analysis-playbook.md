@@ -56,8 +56,34 @@ Detailed checklists for each analysis layer. Read this during Step 3 of the work
 - [ ] Configuration file locations
 - [ ] "God directories" — directories with 50+ files (signals poor organization, important for rules)
 
+### File Role Inventory
+
+For every code file in each layer directory, annotate:
+
+| Column | Description |
+|--------|-------------|
+| File | File path relative to source root |
+| Layer | controller / service / repository / middleware / util / config / model / etc. |
+| Role | What this file does (e.g., "handles user CRUD", "payment callback webhook") |
+| Audience | Who consumes this file's functionality: `frontend`, `admin`, `third-party/open-api`, `internal-service`, `scheduled-task/worker`, `webhook` |
+| Notes | Special conventions, naming deviations, or relationship to other files |
+
+**Detection clues** (use all four to determine Audience):
+1. **URL prefix** — `/api/v1/` (frontend), `/admin/` (admin), `/open/` or `/external/` (third-party), `/internal/` (microservice), `/webhook/` or `/callback/` (webhook)
+2. **Auth middleware** — session/cookie auth → frontend/admin; API key / OAuth → third-party; service token / no auth on internal network → internal-service; signature verification → webhook
+3. **Response format** — different response envelopes or field naming for different audiences (e.g., frontend returns `{code, msg, data}`, open API returns `{error_code, error_msg, result}`)
+4. **File naming / location** — `api/UserController` vs `admin/UserController`; `XxxApiController` vs `XxxController`; `open/` directory vs `web/` directory
+
+**Disambiguation of similar files:**
+When two or more files in the same layer handle the same domain entity (e.g., `api.py` and `user.py` both have user-related endpoints):
+- [ ] Compare their URL prefixes
+- [ ] Compare their auth requirements
+- [ ] Compare their response formats
+- [ ] Compare their callers (which frontend/client calls them)
+- [ ] Document the difference: e.g., "`api.py` exposes user data to third-party integrators via API key auth; `user.py` serves the frontend SPA via session auth"
+
 ### Rules to generate
-→ `architecture.md`: layer pattern, module map, where to put new code
+→ `architecture.md`: layer pattern, module map, where to put new code, **file role map with audience**
 → `naming-conventions.md`: file/directory naming patterns
 
 ---
@@ -114,8 +140,33 @@ For each controller sampled:
 4. Capture the return type wrapping pattern
 5. Check if there's consistent logging at entry/exit
 
+### File Usage Scenario Analysis
+
+For ALL controller/handler/route files (not just sampled ones), classify each by audience:
+
+1. **List all files** in the controller/handler/route directories:
+   ```bash
+   find . -path "*/controller*" -o -path "*/handler*" -o -path "*/route*" -o -path "*/api*" -o -path "*/admin*" | grep -E "\.(java|php|py|js|ts|go|cs)$" | sort
+   ```
+2. **For each file**, determine audience using the 4 clues (URL prefix, auth middleware, response format, naming/location)
+3. **Group files by audience**:
+   - Frontend-facing controllers (serve web/mobile client)
+   - Admin-facing controllers (serve admin panel)
+   - Third-party/Open API controllers (serve external integrators)
+   - Internal-service controllers (serve other microservices)
+   - Webhook/callback handlers (receive external notifications)
+4. **Document differences between groups**: Do they share the same response format? Same auth middleware? Same base class? Same error handling?
+5. **Flag files that serve multiple audiences** — these are risk points for rules (e.g., a single controller that mixes admin and frontend endpoints)
+
+**Common patterns to look for:**
+- Separate directories/packages per audience: `controllers/api/`, `controllers/admin/`, `controllers/open/`
+- Separate route files: `routes/api.php`, `routes/web.php`, `routes/admin.php`
+- URL prefix grouping: `/api/v1/` vs `/manage/` vs `/open/`
+- Different base classes: `BaseApiController` vs `BaseAdminController`
+- Different middleware stacks: `[auth:api]` vs `[auth:admin]` vs `[auth:api_key]`
+
 ### Rules to generate
-→ `api-design.md`: URL patterns, response format, error codes, pagination
+→ `api-design.md`: URL patterns, response format, error codes, pagination, **audience-specific API conventions**
 → `coding-patterns.md`: request validation approach
 
 ---
@@ -142,6 +193,19 @@ Sample 2–3 service/business classes per module. Look for:
 - [ ] Logging patterns: what's logged at entry/exit, log level conventions
 - [ ] Inter-service communication: direct method calls, events, message queue
 - [ ] Concurrency control: locks, optimistic locking, distributed locks
+
+#### Service File Caller Analysis
+For ALL service/business files (not just sampled ones), classify by their primary caller:
+- [ ] **API-layer services** — called by controllers, serve HTTP request/response cycle
+- [ ] **Scheduled-task services** — called by cron jobs, task schedulers, or queue consumers
+- [ ] **Internal-utility services** — shared helper services called by other services (e.g., `NotificationService`, `FileUploadService`)
+- [ ] **Integration services** — wrap third-party API calls (e.g., `PaymentGatewayService`, `SmsService`)
+- [ ] **Event-driven services** — triggered by message queue consumers or event listeners
+
+For each service file, note:
+1. Who calls it (grep for class/function references across the codebase)
+2. Whether it's stateless or holds request-scoped state
+3. Whether it has special transaction/retry/timeout requirements compared to the dominant pattern
 
 #### Import / Alias Consistency
 - [ ] Scan how the same module/package is imported across different files
@@ -318,7 +382,7 @@ Key areas:
 
 ### Rules to generate
 → `pitfalls.md`: all interview-discovered constraints
-→ Module-specific rule files `.rules-{module}.md` if applicable
+→ Module-specific rule files `legacy-rules-{module}.md` if applicable
 
 ---
 
@@ -337,6 +401,22 @@ Key areas:
 - Vendor/node_modules directories
 - Test fixtures and mock data
 - Database migration files (read for schema info, but don't model code style from them)
+- Compiled / build output files (see "Files to Exclude" below)
+
+### Files to Exclude from Code Style Analysis
+
+When mapping project structure and sampling code, **skip** the following files and directories. They are either auto-generated, compiled output, or migration boilerplate — not representative of the project's coding conventions.
+
+| Language | Exclude Patterns |
+|----------|-----------------|
+| Java | `target/`, `build/`, `*.class`, `*.jar`, `*.war`, `generated-sources/`, `generated-test-sources/`, `out/` |
+| PHP | `vendor/`, `storage/`, `bootstrap/cache/`, `compiled.php`, `*.blade.php` cache files |
+| Python | `__pycache__/`, `*.pyc`, `*.pyo`, `migrations/`, `*/migrations/*.py` (except `__init__.py`), `*.egg-info/`, `dist/`, `build/`, `.tox/`, `.venv/`, `venv/` |
+| Node.js | `node_modules/`, `dist/`, `build/`, `.next/`, `.nuxt/`, `coverage/`, `*.min.js`, `*.bundle.js`, `*.map` |
+| Go | `vendor/` (if `go.mod` exists — use modules), compiled binaries (files with no extension in `cmd/`), `*.test`, `*_gen.go`, `*.pb.go` (protobuf generated) |
+| .NET | `bin/`, `obj/`, `Migrations/` (EF Core — read for schema info only), `*.Designer.cs`, `*.AssemblyInfo.cs`, `packages/`, `*.g.cs` (source-generated) |
+
+**Note**: Migration files should still be READ for schema information (table structure, column types, indexes) during L5 analysis, but their code style should NOT be used as a convention reference. Similarly, compiled/generated files can provide useful metadata but should not influence coding style rules.
 
 ### Project Size Calibration
 
